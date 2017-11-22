@@ -38,7 +38,7 @@ func TestAccVcdVApp_PowerOff(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"vcd_vapp.foobar_allocated", "name", "foobar-allocated"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp.foobar_allocated", "ip", "allocated"),
+						"vcd_vapp.foobar_allocated", "ip_allocation_mode", "allocated"),
 					resource.TestCheckResourceAttr(
 						"vcd_vapp.foobar_allocated", "power_on", "true"),
 				),
@@ -52,7 +52,7 @@ func TestAccVcdVApp_PowerOff(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"vcd_vapp.foobar", "name", "foobar"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp.foobar", "ip", "10.10.103.160"),
+						"vcd_vapp.foobar", "networks[0].ip", "10.10.103.160"),
 					resource.TestCheckResourceAttr(
 						"vcd_vapp.foobar", "power_on", "false"),
 				),
@@ -180,13 +180,12 @@ resource "vcd_vapp" "foobar" {
     },
     {
       "orgnetwork" = "${vcd_network.foonet3.name}",
-      "ip"         = "allocated",
+      "ip_allocation_mode"         = "allocated",
       "is_primary" = true,
 	}
   ]
   memory        = 1024
   cpus          = 1
-  ip            = "10.10.102.160"
 }
 `
 

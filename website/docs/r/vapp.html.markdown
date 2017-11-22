@@ -67,15 +67,12 @@ The following arguments are supported:
 * `cpus` - (Optional) The number of virtual CPUs to allocate to the vApp
 * `initscript` (Optional) A script to be run only on initial boot
 * `networks` - (Optional) List of network adapter definitions
-  - `orgnetwork` (Required) name of organization network to use
-  - `ip` (Optional) see below
-  - `is_primary` (Optional) A boolean value which ensures that the network adapter is
-  primary
-* `ip` - (Optional) The IP to assign to this vApp. Must be an IP address or
-  one of dhcp, allocated or none. If given the address must be within the
-  `static_ip_pool` set for the network. If left blank, and the network has
-  `dhcp_pool` set with at least one available IP then this will be set with
-  DHCP.
+  - `orgnetwork` - (Required) name of organization network to use
+  - `ip` - (Optional) The IP to assign to this vApp. Must be an IP address or blank. If given the address must be within the
+  `static_ip_pool` set for the network. If left blank, `ip_allocation_mode` should be set, or DHCP is used.
+  - `ip_allocation_mode` - (Optional) Instruct how the virtual machine must acquire an IP address if not a static one is provided. Can be either `allocated` for vCloud to provide an IP from the `static_ip_pool` or `dhcp` for DHCP acquisition.
+  - `is_primary` - (Optional) A boolean value which ensures that the network adapter is
+  primary. This flag should only be set to true once.
 * `metadata` - (Optional) Key value map of metadata to assign to this vApp
 * `ovf` - (Optional) Key value map of ovf parameters to assign to VM product section
 * `power_on` - (Optional) A boolean value stating if this vApp should be powered on. Default to `true`

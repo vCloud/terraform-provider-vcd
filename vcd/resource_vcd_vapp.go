@@ -3,6 +3,7 @@ package vcd
 import (
 	"fmt"
 	"log"
+	"net"
 
 	"github.com/hashicorp/terraform/helper/resource"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -32,7 +33,7 @@ func resourceVcdVApp() *schema.Resource {
 				Optional: true,
 			},
 			"networks": {
-				Type:     schema.TypeSet,
+				Type:     schema.TypeList,
 				Optional: true,
 				ForceNew: true,
 				Elem: &schema.Resource{
@@ -42,9 +43,14 @@ func resourceVcdVApp() *schema.Resource {
 							Required: true,
 						},
 						"ip": {
+							Type:             schema.TypeString,
+							Optional:         true,
+							Computed:         true,
+							DiffSuppressFunc: suppressIPDifferences,
+						},
+						"ip_allocation_mode": &schema.Schema{
 							Type:     schema.TypeString,
 							Optional: true,
-							Computed: true,
 						},
 						"is_primary": {
 							Type:     schema.TypeBool,
@@ -61,11 +67,6 @@ func resourceVcdVApp() *schema.Resource {
 			"cpus": {
 				Type:     schema.TypeInt,
 				Optional: true,
-			},
-			"ip": {
-				Type:     schema.TypeString,
-				Optional: true,
-				Computed: true,
 			},
 			"storage_profile": {
 				Type:     schema.TypeString,
@@ -127,7 +128,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 
 			networks := []*types.OrgVDCNetwork{}
 
-			if nets := d.Get("networks").(*schema.Set).List(); nets != nil {
+			if nets := d.Get("networks").([]interface{}); nets != nil {
 				for _, network := range nets {
 					n := network.(map[string]interface{})
 					net, err := vcdClient.OrgVdc.FindVDCNetwork(n["orgnetwork"].(string))
@@ -138,6 +139,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 				}
 			}
 
+			// CONFIGURE STORAGE PROFILES
 			storage_profile_reference := types.Reference{}
 
 			// Override default_storage_profile if we find the given storage profile
@@ -150,6 +152,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 
 			log.Printf("storage_profile %s", storage_profile_reference)
 
+			// COMPOSE VAPP
 			vapp, err := vcdClient.OrgVdc.FindVAppByName(d.Get("name").(string))
 
 			if err != nil {
@@ -169,6 +172,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 				}
 			}
 
+			// CONFIGURE VIRTUAL MACHINE NAME
 			err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
 				task, err := vapp.ChangeVMName(d.Get("name").(string))
 				if err != nil {
@@ -181,14 +185,16 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 				return fmt.Errorf("error changing vmname: %#v", err)
 			}
 
+			// CONFIGURE NETWORKS
 			n := []map[string]interface{}{}
 
-			nets := d.Get("networks").(*schema.Set).List()
+			nets := d.Get("networks").([]interface{})
 			for _, network := range nets {
 				n = append(n, network.(map[string]interface{}))
 			}
 			err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
-				task, err := vapp.ChangeNetworkConfig(n, d.Get("ip").(string))
+
+				task, err := vapp.ChangeNetworkConfig(n)
 				if err != nil {
 					return resource.RetryableError(fmt.Errorf("error with Networking change: %#v", err))
 				}
@@ -198,6 +204,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 				return fmt.Errorf("error changing network: %#v", err)
 			}
 
+			// CONFIGURE OVF SETTINGS
 			if ovf, ok := d.GetOk("ovf"); ok {
 				err := retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
 					task, err := vapp.SetOvf(convertToStringMap(ovf.(map[string]interface{})))
@@ -212,6 +219,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 				}
 			}
 
+			// TURN ON VIRTUAL MACHINE
 			if d.Get("power_on").(bool) == true {
 				err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
 					task, err := vapp.PowerOn()
@@ -226,6 +234,7 @@ func resourceVcdVAppCreate(d *schema.ResourceData, meta interface{}) error {
 				}
 			}
 
+			// CONFIGURE VIRTUAL MACHINE WITH INITSCRIPT
 			initscript := d.Get("initscript").(string)
 
 			err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
@@ -308,12 +317,12 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 	if d.HasChange("networks") {
 		n := []map[string]interface{}{}
 
-		nets := d.Get("networks").(*schema.Set).List()
+		nets := d.Get("networks").([]interface{})
 		for _, network := range nets {
 			n = append(n, network.(map[string]interface{}))
 		}
 		err = retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
-			task, err := vapp.ChangeNetworkConfig(n, d.Get("ip").(string))
+			task, err := vapp.ChangeNetworkConfig(n)
 			if err != nil {
 				return resource.RetryableError(fmt.Errorf("error with Networking change: %#v", err))
 			}
@@ -341,7 +350,6 @@ func resourceVcdVAppUpdate(d *schema.ResourceData, meta interface{}) error {
 	if d.HasChange("memory") || d.HasChange("cpus") || d.HasChange("power_on") || d.HasChange("ovf") {
 
 		if status != "POWERED_OFF" {
-
 			task, err := vapp.PowerOff()
 			if err != nil {
 				// can't *always* power off an empty vApp so not necesarrily an error
@@ -431,77 +439,26 @@ func resourceVcdVAppRead(d *schema.ResourceData, meta interface{}) error {
 		return nil
 	}
 
-	if _, ok := d.GetOk("ip"); ok {
-		var ip string
-
-		oldIp, newIp := d.GetChange("ip")
-
-		log.Printf("[DEBUG] IP has changes, old: %s - new: %s", oldIp, newIp)
-
-		if newIp != "allocated" {
-			log.Printf("[DEBUG] IP is assigned. Lets get it (%s)", d.Get("ip"))
-			ip, err = getVAppIPAddress(d, meta)
-			if err != nil {
-				return err
-			}
-		} else {
-			log.Printf("[DEBUG] IP is 'allocated'")
-		}
-
-		d.Set("ip", ip)
-	} 
-
 	if _, ok := d.GetOk("networks"); ok {
-		networks := []map[string]interface{}{}
 
-		oldNetworks, newNetworks := d.GetChange("networks")
-
-		log.Printf("[DEBUG] Networks has changes, old: %s - new: %s", oldNetworks, newNetworks)
-
-		if newNetworks != "allocated" {
-			log.Printf("[DEBUG] IP is assigned. Lets get it (%s)", d.Get("ip"))
-			networks, err = getVAppNetwork(d, meta)
-			if err != nil {
-				return err
-			}
-		} else {
-			log.Printf("[DEBUG] IP is 'allocated'")
+		vAppNetworks, err := getVAppNetwork(d, meta)
+		if err != nil {
+			return err
 		}
 
-		d.Set("networks", networks)
+		log.Printf("[DEBUG] Network from vApp: %s", vAppNetworks)
+
+		err := d.Set("networks", vAppNetworks)
+
+		if err != nil {
+			return err
+		}
+
 	}
 
 	return nil
 }
 
-func getVAppIPAddress(d *schema.ResourceData, meta interface{}) (string, error) {
-	vcdClient := meta.(*VCDClient)
-	var ip string
-
-	err := retryCall(vcdClient.MaxRetryTimeout, func() *resource.RetryError {
-		err := vcdClient.OrgVdc.Refresh()
-		if err != nil {
-			return resource.RetryableError(fmt.Errorf("error refreshing vdc: %#v", err))
-		}
-		vapp, err := vcdClient.OrgVdc.FindVAppByName(d.Id())
-		if err != nil {
-			return resource.RetryableError(fmt.Errorf("unable to find vapp"))
-		}
-
-		// getting the IP of the specific Vm, rather than index zero.
-		// Required as once we add more VM's, index zero doesn't guarantee the
-		// 'first' one, and tests will fail sometimes (annoying huh?)
-		vm, err := vcdClient.OrgVdc.FindVMByName(vapp, d.Get("name").(string))
-
-		ip = vm.VM.NetworkConnectionSection.NetworkConnection[vm.VM.NetworkConnectionSection.PrimaryNetworkConnectionIndex].IPAddress
-		if ip == "" {
-			return resource.RetryableError(fmt.Errorf("timeout: VM did not acquire IP address"))
-		}
-		return nil
-	})
-
-	return ip, err
-}
 
 func getVAppNetwork(d *schema.ResourceData, meta interface{}) ([]map[string]interface{}, error) {
 	vcdClient := meta.(*VCDClient)
@@ -522,14 +479,23 @@ func getVAppNetwork(d *schema.ResourceData, meta interface{}) ([]map[string]inte
 		// 'first' one, and tests will fail sometimes (annoying huh?)
 		vm, err := vcdClient.OrgVdc.FindVMByName(vapp, d.Get("name").(string))
 
+		primaryInterfaceIndex := vm.VM.NetworkConnectionSection.PrimaryNetworkConnectionIndex
+
 		for _, v := range vm.VM.NetworkConnectionSection.NetworkConnection {
-			if v.IPAddress != "" {
-				n := make(map[string]interface{})
-				n["orgnetwork"] = v.Network
-				n["ip"] = v.IPAddress
-				networks = append(networks, n)
+			n := make(map[string]interface{})
+			n["ip"] = v.IPAddress
+			n["orgnetwork"] = v.Network
+			n["ip_allocation_mode"] = ipAllocationModeToTerraform(v.IPAddressAllocationMode)
+
+			if v.NetworkConnectionIndex == primaryInterfaceIndex {
+				n["is_primary"] = true
+			} else {
+				n["is_primary"] = false
 			}
+
+			networks = append(networks, n)
 		}
+
 		if networks == nil {
 			return resource.RetryableError(fmt.Errorf("timeout: VM did not acquire IP address"))
 		}
@@ -570,4 +536,39 @@ func resourceVcdVAppDelete(d *schema.ResourceData, meta interface{}) error {
 	})
 
 	return err
+}
+
+// Suppress Diff on equal ip
+func suppressIPDifferences(k, old, new string, d *schema.ResourceData) bool {
+	o := net.ParseIP(old)
+	n := net.ParseIP(new)
+
+	if o != nil && n != nil {
+		return o.Equal(n)
+	}allocation
+	return false
+}
+
+func ipAllocationModeToTerraform(vmMode string) string {
+	if vmMode == "DHCP" {
+		return "dhcp"
+	} else if vmMode == "NONE" {
+		return "none"
+
+	} else if vmMode == "POOL" {
+		return "allocated"
+	}
+	return ""
+}
+
+func terraformAllocationToIPAllocationMode(tfMode string) string {
+	if tfMode == "dhcp" {
+		return "DHCP"
+	} else if tfMode == "none" {
+		return "NONE"
+
+	} else if tfMode == "allocated" {
+		return "POOL"
+	}
+	return "MANUAL"
 }

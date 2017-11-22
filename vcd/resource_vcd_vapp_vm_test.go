@@ -26,7 +26,7 @@ func TestAccVcdVAppVm_Basic(t *testing.T) {
 					resource.TestCheckResourceAttr(
 						"vcd_vapp_vm.moo", "name", "moo"),
 					resource.TestCheckResourceAttr(
-						"vcd_vapp_vm.moo", "ip", "10.10.102.161"),
+						"vcd_vapp_vm.moo", "networks[0].ip", "10.10.102.161"),
 					resource.TestCheckResourceAttr(
 						"vcd_vapp_vm.moo", "power_on", "true"),
 				),
@@ -99,7 +99,6 @@ resource "vcd_vapp" "foobar" {
   catalog_name  = "Skyscape Catalogue"
   memory        = 1024
   cpus          = 1
-  ip            = "10.10.102.160"
 }
 
 resource "vcd_vapp_vm" "moo" {
@@ -110,12 +109,12 @@ resource "vcd_vapp_vm" "moo" {
   networks      = [
     {
       "orgnetwork" = "${vcd_network.foonet.name}",
-      "ip" = "allocated",
-      "is_primary" = true,
+      "ip_allocation_mode" = "none",
+	  "is_primary" = true,
+	  "ip" = "10.10.102.161"
     }
   ]
   memory        = 1024
   cpus          = 1
-  ip            = "10.10.102.161"
 }
 `
