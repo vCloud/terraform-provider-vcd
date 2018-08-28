@@ -30,7 +30,7 @@
   version = "0.11.3"
 
 [[constraint]]
-  name = "github.com/kradalby/govcloudair"
+  name = "github.com/vCloud/govcloudair"
   branch = "master"
 
 [prune]

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/url"
 
-	govcd "github.com/kradalby/govcloudair" // Forked from vmware/govcloudair
-	types "github.com/kradalby/govcloudair/types/v56"
+	govcd "github.com/vCloud/govcloudair" // Forked from vmware/govcloudair
+	types "github.com/vCloud/govcloudair/types/v56"
 )
 
 type Config struct {
